@@ -1,0 +1,204 @@
+<!DOCTYPE html><html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>사람 vs AI 체스</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      background-color: #f8f8f8;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(8, 60px);
+      grid-template-rows: repeat(8, 60px);
+      gap: 0;
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 32px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .white { background-color: #eee; }
+    .black { background-color: #555; color: white; }
+    #log {
+      margin-top: 15px;
+      background: white;
+      padding: 10px;
+      border: 1px solid #ccc;
+      width: 480px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>사람 vs AI 체스</h1>
+  <button onclick="startGame()">게임 시작</button>
+  <div id="board"></div>
+  <div id="log"></div>  <script>
+    const PIECES = {
+      r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
+      R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔", P: "♙"
+    };
+
+    let board = [], selected = null, playerTurn = true;
+    const depth = 2;
+
+    function startGame() {
+      document.getElementById("log").innerHTML = "게임이 시작되었습니다.";
+      board = [
+        ['r','n','b','q','k','b','n','r'],
+        ['p','p','p','p','p','p','p','p'],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['P','P','P','P','P','P','P','P'],
+        ['R','N','B','Q','K','B','N','R']
+      ];
+      playerTurn = true;
+      render();
+    }
+
+    function render() {
+      const boardDiv = document.getElementById("board");
+      boardDiv.innerHTML = '';
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const cell = document.createElement("div");
+          cell.className = "cell " + ((x + y) % 2 === 0 ? "white" : "black");
+          cell.textContent = PIECES[board[y][x]] || '';
+          cell.onclick = () => onClick(x, y);
+          boardDiv.appendChild(cell);
+        }
+      }
+    }
+
+    function onClick(x, y) {
+      if (!playerTurn) return;
+      const piece = board[y][x];
+      if (selected) {
+        if (isValidMove(selected.x, selected.y, x, y)) {
+          move(selected.x, selected.y, x, y);
+          playerTurn = false;
+          render();
+          setTimeout(() => {
+            const moveAI = getBestMove(depth);
+            if (moveAI) {
+              move(moveAI.from.x, moveAI.from.y, moveAI.to.x, moveAI.to.y);
+              log(`AI: ${moveAI.from.x},${moveAI.from.y} → ${moveAI.to.x},${moveAI.to.y}`);
+            }
+            playerTurn = true;
+            render();
+          }, 300);
+        }
+        selected = null;
+      } else if (piece && piece === piece.toUpperCase()) {
+        selected = { x, y };
+      }
+    }
+
+    function isValidMove(fx, fy, tx, ty) {
+      const piece = board[fy][fx];
+      const target = board[ty][tx];
+      return piece && piece === piece.toUpperCase() && (!target || target !== target.toUpperCase());
+    }
+
+    function move(fx, fy, tx, ty) {
+      board[ty][tx] = board[fy][fx];
+      board[fy][fx] = '';
+    }
+
+    function getMoves(isWhite) {
+      let moves = [];
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const piece = board[y][x];
+          if (piece && (isWhite ? piece === piece.toUpperCase() : piece === piece.toLowerCase())) {
+            for (let yy = 0; yy < 8; yy++) {
+              for (let xx = 0; xx < 8; xx++) {
+                if (isValidMove(x, y, xx, yy)) {
+                  moves.push({ from: {x, y}, to: {x: xx, y: yy} });
+                }
+              }
+            }
+          }
+        }
+      }
+      return moves;
+    }
+
+    function evaluate() {
+      const val = { p: -1, r: -5, n: -3, b: -3, q: -9, k: -1000,
+                    P: 1, R: 5, N: 3, B: 3, Q: 9, K: 1000 };
+      return board.flat().reduce((s, p) => s + (val[p] || 0), 0);
+    }
+
+    function getBestMove(depth) {
+      let best = -Infinity, bestMove = null;
+      const moves = getMoves(false);
+      for (const m of moves) {
+        const copy = JSON.parse(JSON.stringify(board));
+        move(m.from.x, m.from.y, m.to.x, m.to.y);
+        const score = minimax(depth - 1, -Infinity, Infinity, true);
+        board = copy;
+        if (score > best) {
+          best = score;
+          bestMove = m;
+        }
+      }
+      return bestMove;
+    }
+
+    function minimax(depth, alpha, beta, isMax) {
+      if (depth === 0) return evaluate();
+      const moves = getMoves(isMax);
+      if (isMax) {
+        let max = -Infinity;
+        for (const m of moves) {
+          const copy = JSON.parse(JSON.stringify(board));
+          move(m.from.x, m.from.y, m.to.x, m.to.y);
+          const val = minimax(depth - 1, alpha, beta, false);
+          board = copy;
+          max = Math.max(max, val);
+          alpha = Math.max(alpha, val);
+          if (beta <= alpha) break;
+        }
+        return max;
+      } else {
+        let min = Infinity;
+        for (const m of moves) {
+          const copy = JSON.parse(JSON.stringify(board));
+          move(m.from.x, m.from.y, m.to.x, m.to.y);
+          const val = minimax(depth - 1, alpha, beta, true);
+          board = copy;
+          min = Math.min(min, val);
+          beta = Math.min(beta, val);
+          if (beta <= alpha) break;
+        }
+        return min;
+      }
+    }
+
+    function log(text) {
+      const el = document.getElementById("log");
+      el.innerHTML += `<div>${text}</div>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    startGame();
+  </script></body>
+</html>
