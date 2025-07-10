@@ -329,9 +329,9 @@
 
   <script>
     const PIECES = {
-      r: \"♜\", n: \"♞\", b: \"♝\", q: \"♛\", k: \"♚\", p: \"♟\",
-      R: \"♖\", N: \"♘\", B: \"♗\", Q: \"♕\", K: \"♔\", P: \"♙\"
-    };
+  r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
+  R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔", P: "♙"
+};
 
     let board = [], selected = null, whiteTurn = true;
     let castlingRights = { K: true, Q: true, k: true, q: true };
@@ -546,13 +546,6 @@
         logDiv.scrollTop = logDiv.scrollHeight;
       }
     }
-
-    // 초기 실행
-    window.onload = startGame;
-  </script>
-</body>
-</html>
-
 
     // 초기 실행
     window.onload = startGame;
