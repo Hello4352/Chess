@@ -53,6 +53,7 @@
   <div id="board"></div>
   <div id="log"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@mliebelt/pgn-parser/stockfish.js"></script>
   <script>
     const PIECES = {
       r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
@@ -63,6 +64,8 @@
     let castlingRights = { K: true, Q: true, k: true, q: true };
     let enPassant = null;
     let logDiv = null;
+
+    let engine;
 
     function startGame() {
       board = [
@@ -82,6 +85,24 @@
       logDiv = document.getElementById("log");
       logDiv.innerHTML = "<b>게임 로그</b><br>";
       render();
+      if (!engine) {
+        engine = new Worker("https://cdn.jsdelivr.net/npm/stockfish/stockfish.js");
+        engine.onmessage = function(e) {
+          if (typeof e.data === "string" && e.data.startsWith("bestmove")) {
+            const move = e.data.split(" ")[1];
+            if (move.length === 4) {
+              const fx = move.charCodeAt(0) - 97;
+              const fy = 8 - parseInt(move[1]);
+              const tx = move.charCodeAt(2) - 97;
+              const ty = 8 - parseInt(move[3]);
+              movePiece(fx, fy, tx, ty);
+              whiteTurn = true;
+              render();
+              checkGameOver();
+            }
+          }
+        };
+      }
     }
 
     function render() {
@@ -109,155 +130,37 @@
       if (selected) {
         const sx = selected.x, sy = selected.y;
         const selPiece = board[sy][sx];
-        if ((whiteTurn && isWhite(selPiece)) || (!whiteTurn && isBlack(selPiece))) {
-          const moves = getValidMoves(sx, sy);
-          const legal = moves.some(m => m.x === x && m.y === y);
-          if (legal) {
-            move(sx, sy, x, y);
-            whiteTurn = !whiteTurn;
-            selected = null;
-            render();
-            setTimeout(aiMove, 300);
-            return;
-          }
+        const legal = getValidMoves(sx, sy).some(m => m.x === x && m.y === y);
+        if (legal) {
+          move(sx, sy, x, y);
+          whiteTurn = false;
+          selected = null;
+          render();
+          checkGameOver();
+          setTimeout(aiMove, 300);
+          return;
         }
         selected = null;
-      } else {
-        if ((whiteTurn && isWhite(piece)) || (!whiteTurn && isBlack(piece))) {
-          selected = { x, y };
-        }
+      } else if ((whiteTurn && isWhite(piece))) {
+        selected = { x, y };
       }
       render();
     }
-
-    function isWhite(p) { return p && p === p.toUpperCase(); }
-    function isBlack(p) { return p && p === p.toLowerCase(); }
 
     function move(sx, sy, dx, dy) {
       const piece = board[sy][sx];
-      const target = board[dy][dx];
-
-      if (piece.toLowerCase() === 'p' && enPassant &&
-          dx === enPassant.x && dy === enPassant.y) {
-        if (isWhite(piece)) board[dy + 1][dx] = '';
-        else board[dy - 1][dx] = '';
-      }
-
-      if (piece.toLowerCase() === 'k' && Math.abs(dx - sx) === 2) {
-        if (dx > sx) {
-          board[dy][5] = board[dy][7]; board[dy][7] = '';
-        } else {
-          board[dy][3] = board[dy][0]; board[dy][0] = '';
-        }
-      }
-
-      if (piece === 'P' && dy === 0) board[dy][dx] = 'Q';
-      else if (piece === 'p' && dy === 7) board[dy][dx] = 'q';
-      else board[dy][dx] = piece;
-
+      board[dy][dx] = piece;
       board[sy][sx] = '';
-
-      enPassant = null;
-      if (piece.toLowerCase() === 'p' && Math.abs(dy - sy) === 2) {
-        enPassant = { x: sx, y: (sy + dy) / 2 };
-      }
-
       log(`${piece} ${String.fromCharCode(97 + sx)}${8 - sy} → ${String.fromCharCode(97 + dx)}${8 - dy}`);
-    }
-
-    function getValidMoves(x, y) {
-      const piece = board[y][x];
-      const moves = [];
-
-      const directions = {
-        n: [[-2, -1],[2, -1],[-1, -2],[1, -2],[2,1],[1,2],[-1,2],[-2,1]],
-        b: [[-1,-1],[-1,1],[1,-1],[1,1]],
-        r: [[0,1],[1,0],[0,-1],[-1,0]],
-        q: [[0,1],[1,0],[0,-1],[-1,0],[-1,-1],[-1,1],[1,-1],[1,1]],
-        k: [[0,1],[1,0],[0,-1],[-1,0],[-1,-1],[-1,1],[1,-1],[1,1]]
-      };
-
-      const addMove = (nx, ny) => {
-        if (nx < 0 || nx > 7 || ny < 0 || ny > 7) return false;
-        const target = board[ny][nx];
-        if (!target || isWhite(piece) !== isWhite(target)) {
-          moves.push({ x: nx, y: ny });
-          return !target;
-        }
-        return false;
-      };
-
-      const isW = isWhite(piece);
-      const type = piece.toLowerCase();
-
-      if (type === 'p') {
-        const dir = isW ? -1 : 1;
-        if (!board[y + dir][x]) moves.push({ x, y: y + dir });
-        if ((isW && y === 6) || (!isW && y === 1)) {
-          if (!board[y + dir][x] && !board[y + dir*2][x])
-            moves.push({ x, y: y + dir*2 });
-        }
-        for (let dx of [-1, 1]) {
-          const nx = x + dx;
-          const ny = y + dir;
-          if (nx >= 0 && nx <= 7) {
-            const target = board[ny]?.[nx];
-            if (target && isWhite(target) !== isW)
-              moves.push({ x: nx, y: ny });
-            else if (enPassant && enPassant.x === nx && enPassant.y === ny)
-              moves.push({ x: nx, y: ny });
-          }
-        }
-      } else if (type === 'n') {
-        for (let [dx, dy] of directions.n) addMove(x + dx, y + dy);
-      } else if (type === 'b' || type === 'r' || type === 'q') {
-        for (let [dx, dy] of directions[type]) {
-          let nx = x + dx, ny = y + dy;
-          while (addMove(nx, ny)) { nx += dx; ny += dy; }
-        }
-      } else if (type === 'k') {
-        for (let [dx, dy] of directions.k) addMove(x + dx, y + dy);
-
-        if (isW && y === 7 && x === 4 && piece === 'K') {
-          if (castlingRights.K && !board[7][5] && !board[7][6]) moves.push({ x: 6, y: 7 });
-          if (castlingRights.Q && !board[7][3] && !board[7][2] && !board[7][1]) moves.push({ x: 2, y: 7 });
-        }
-        if (!isW && y === 0 && x === 4 && piece === 'k') {
-          if (castlingRights.k && !board[0][5] && !board[0][6]) moves.push({ x: 6, y: 0 });
-          if (castlingRights.q && !board[0][3] && !board[0][2] && !board[0][1]) moves.push({ x: 2, y: 0 });
-        }
-      }
-
-      return moves;
-    }
-
-    function aiMove() {
-      const moves = [];
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          const piece = board[y][x];
-          if (isBlack(piece)) {
-            const legal = getValidMoves(x, y);
-            for (const move of legal) {
-              moves.push({ from: { x, y }, to: move });
-            }
-          }
-        }
-      }
-      if (moves.length === 0) {
-        log("체크메이트 또는 스테일메이트: AI는 둘 수 없습니다.");
-        return;
-      }
-      const move = moves[Math.floor(Math.random() * moves.length)];
-      movePiece(move.from.x, move.from.y, move.to.x, move.to.y);
-      whiteTurn = true;
-      render();
     }
 
     function movePiece(fx, fy, tx, ty) {
       selected = null;
       move(fx, fy, tx, ty);
     }
+
+    function isWhite(p) { return p && p === p.toUpperCase(); }
+    function isBlack(p) { return p && p === p.toLowerCase(); }
 
     function log(text) {
       if (logDiv) {
@@ -266,7 +169,37 @@
       }
     }
 
-    document.addEventListener("DOMContentLoaded", startGame);
+    function aiMove() {
+      const fen = boardToFEN();
+      engine.postMessage(`position fen ${fen}`);
+      engine.postMessage("go depth 10");
+    }
+
+    function boardToFEN() {
+      let fen = "";
+      for (let y = 0; y < 8; y++) {
+        let empty = 0;
+        for (let x = 0; x < 8; x++) {
+          const piece = board[y][x];
+          if (!piece) empty++;
+          else {
+            if (empty > 0) { fen += empty; empty = 0; }
+            fen += piece;
+          }
+        }
+        if (empty > 0) fen += empty;
+        if (y !== 7) fen += "/";
+      }
+      fen += whiteTurn ? " w" : " b";
+      fen += " - - 0 1"; // no castling/en passant info for now
+      return fen;
+    }
+
+    function checkGameOver() {
+      // 향후 체크/체크메이트 감지 로직 추가 가능
+    }
+
+    window.onload = startGame;
   </script>
 </body>
 </html>
