@@ -26,7 +26,7 @@
       align-items: center;
       font-size: 34px;
       cursor: pointer;
-      position: relative; /* 동그라미 위치 기준 */
+      position: relative;
     }
     .white {
       background: #f9f9f9;
@@ -37,6 +37,14 @@
     }
     .selected {
       outline: 3px solid yellow;
+    }
+    .dot {
+      width: 14px;
+      height: 14px;
+      background: rgba(255, 165, 0, 0.8);
+      border-radius: 50%;
+      position: absolute;
+      pointer-events: none;
     }
     #log {
       width: 480px;
@@ -53,14 +61,9 @@
       padding: 8px 16px;
       font-size: 16px;
     }
-    /* 동그라미 표시 */
-    .dot {
-      width: 14px;
-      height: 14px;
-      background: rgba(255, 165, 0, 0.8);
-      border-radius: 50%;
-      position: absolute;
-      pointer-events: none;
+    .white-piece {
+      background: #ffffff !important;
+      color: black !important;
     }
   </style>
 </head>
@@ -115,11 +118,14 @@
           const piece = board[y][x];
           cell.textContent = PIECES[piece] || '';
 
-          // AI 기물은 항상 검정색으로 표시
-          if (piece && piece === piece.toLowerCase()) {
+          // AI 기물은 검정색
+          if (piece && isBlack(piece)) {
             cell.style.color = "black";
-          } else {
-            cell.style.color = "";
+          }
+
+          // 사용자 기물: 배경 흰색
+          if (piece && isWhite(piece)) {
+            cell.classList.add("white-piece");
           }
 
           cell.dataset.x = x;
@@ -128,7 +134,6 @@
             cell.classList.add("selected");
           }
 
-          // 이동 가능 칸에 동그라미 표시
           if (highlightMoves.some(m => m.x === x && m.y === y)) {
             const dot = document.createElement("div");
             dot.className = "dot";
@@ -142,6 +147,8 @@
     }
 
     function onClick(x, y) {
+      if (!whiteTurn) return;
+
       const piece = board[y][x];
       if (selected) {
         const sx = selected.x, sy = selected.y;
@@ -151,10 +158,18 @@
           const legal = moves.some(m => m.x === x && m.y === y);
           if (legal) {
             move(sx, sy, x, y);
-            whiteTurn = !whiteTurn;
+            whiteTurn = false;
             selected = null;
             render();
-            setTimeout(aiMove, 300);
+
+            if (isCheckmate(false)) {
+              log("게임 종료: 사용자 승 (AI 체크메이트)");
+              return;
+            } else if (isKingInCheck(false)) {
+              log("AI가 체크당했습니다!");
+            }
+
+            setTimeout(aiMove, 500);
             return;
           }
         }
@@ -172,10 +187,8 @@
 
     function move(sx, sy, dx, dy) {
       const piece = board[sy][sx];
-      const target = board[dy][dx];
 
-      if (piece.toLowerCase() === 'p' && enPassant &&
-          dx === enPassant.x && dy === enPassant.y) {
+      if (piece.toLowerCase() === 'p' && enPassant && dx === enPassant.x && dy === enPassant.y) {
         if (isWhite(piece)) board[dy + 1][dx] = '';
         else board[dy - 1][dx] = '';
       }
@@ -193,7 +206,6 @@
       else board[dy][dx] = piece;
 
       board[sy][sx] = '';
-
       enPassant = null;
       if (piece.toLowerCase() === 'p' && Math.abs(dy - sy) === 2) {
         enPassant = { x: sx, y: (sy + dy) / 2 };
@@ -229,21 +241,19 @@
 
       if (type === 'p') {
         const dir = isW ? -1 : 1;
-        if (!board[y + dir][x]) moves.push({ x, y: y + dir });
+        if (!board[y + dir]?.[x]) moves.push({ x, y: y + dir });
         if ((isW && y === 6) || (!isW && y === 1)) {
-          if (!board[y + dir][x] && !board[y + dir*2][x])
-            moves.push({ x, y: y + dir*2 });
+          if (!board[y + dir]?.[x] && !board[y + dir * 2]?.[x])
+            moves.push({ x, y: y + dir * 2 });
         }
         for (let dx of [-1, 1]) {
           const nx = x + dx;
           const ny = y + dir;
-          if (nx >= 0 && nx <= 7) {
-            const target = board[ny]?.[nx];
-            if (target && isWhite(target) !== isW)
-              moves.push({ x: nx, y: ny });
-            else if (enPassant && enPassant.x === nx && enPassant.y === ny)
-              moves.push({ x: nx, y: ny });
-          }
+          const target = board[ny]?.[nx];
+          if (target && isWhite(target) !== isW)
+            moves.push({ x: nx, y: ny });
+          else if (enPassant && enPassant.x === nx && enPassant.y === ny)
+            moves.push({ x: nx, y: ny });
         }
       } else if (type === 'n') {
         for (let [dx, dy] of directions.n) addMove(x + dx, y + dy);
@@ -254,22 +264,63 @@
         }
       } else if (type === 'k') {
         for (let [dx, dy] of directions.k) addMove(x + dx, y + dy);
-
-        if (isW && y === 7 && x === 4 && piece === 'K') {
-          if (castlingRights.K && !board[7][5] && !board[7][6]) moves.push({ x: 6, y: 7 });
-          if (castlingRights.Q && !board[7][3] && !board[7][2] && !board[7][1]) moves.push({ x: 2, y: 7 });
-        }
-        if (!isW && y === 0 && x === 4 && piece === 'k') {
-          if (castlingRights.k && !board[0][5] && !board[0][6]) moves.push({ x: 6, y: 0 });
-          if (castlingRights.q && !board[0][3] && !board[0][2] && !board[0][1]) moves.push({ x: 2, y: 0 });
-        }
       }
 
       return moves;
     }
 
+    function isKingInCheck(isWhitePlayer) {
+      let kingPos = null;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const piece = board[y][x];
+          if (piece === (isWhitePlayer ? 'K' : 'k')) {
+            kingPos = { x, y };
+            break;
+          }
+        }
+      }
+      if (!kingPos) return false;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const piece = board[y][x];
+          if (piece && isWhite(piece) !== isWhitePlayer) {
+            const moves = getValidMoves(x, y);
+            if (moves.some(m => m.x === kingPos.x && m.y === kingPos.y)) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    function isCheckmate(isWhitePlayer) {
+      if (!isKingInCheck(isWhitePlayer)) return false;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const piece = board[y][x];
+          if (piece && isWhite(piece) === isWhitePlayer) {
+            const moves = getValidMoves(x, y);
+            for (const move of moves) {
+              const backup = JSON.parse(JSON.stringify(board));
+              movePiece(x, y, move.x, move.y);
+              if (!isKingInCheck(isWhitePlayer)) {
+                board = backup;
+                return false;
+              }
+              board = backup;
+            }
+          }
+        }
+      }
+      return true;
+    }
+
     function aiMove() {
       const moves = [];
+      let bestScore = -Infinity;
+      let best = null;
 
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
@@ -277,27 +328,47 @@
           if (isBlack(piece)) {
             const legal = getValidMoves(x, y);
             for (const move of legal) {
-              moves.push({ from: { x, y }, to: move });
+              const target = board[move.y][move.x];
+              const score = target ? pieceValue(target) : 0;
+              if (score > bestScore || (score === bestScore && Math.random() < 0.5)) {
+                bestScore = score;
+                best = { from: { x, y }, to: move };
+              }
             }
           }
         }
       }
 
-      if (moves.length === 0) {
-        log("체크메이트 또는 스테일메이트: AI는 둘 수 없습니다.");
+      if (!best) {
+        log("AI가 더 이상 둘 수 없습니다 (체크메이트 또는 스테일메이트)");
         return;
       }
 
-      // 랜덤 수 or 향후 미니맥스 대체 가능
-      const move = moves[Math.floor(Math.random() * moves.length)];
-      movePiece(move.from.x, move.from.y, move.to.x, move.to.y);
+      movePiece(best.from.x, best.from.y, best.to.x, best.to.y);
       whiteTurn = true;
       render();
+
+      if (isCheckmate(true)) {
+        log("게임 종료: AI 승 (체크메이트)");
+      } else if (isKingInCheck(true)) {
+        log("당신이 체크당했습니다!");
+      }
     }
 
     function movePiece(fx, fy, tx, ty) {
       selected = null;
       move(fx, fy, tx, ty);
+    }
+
+    function pieceValue(p) {
+      switch (p.toLowerCase()) {
+        case 'q': return 9;
+        case 'r': return 5;
+        case 'b': return 3;
+        case 'n': return 3;
+        case 'p': return 1;
+        default: return 0;
+      }
     }
 
     function log(text) {
