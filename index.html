@@ -26,10 +26,10 @@
       font-size: 34px;
       cursor: pointer;
       position: relative;
-      color: black;
     }
     .white {
       background: #f9f9f9;
+      color: black;
     }
     .black {
       background: #444;
@@ -104,188 +104,170 @@
   <div id="board"></div>
   <div id="log"></div>
   <div id="popup"></div>
-  <div id="promotionMenu"></div>  <script>
+  <div id="promotionMenu"></div>  <script src="https://cdn.jsdelivr.net/npm/chess.js"></script>  <script>
     const PIECES = {
       r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
       R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔", P: "♙"
     };
-    let board = [], selected = null, whiteTurn = true;
-    let castlingRights = { K: true, Q: true, k: true, q: true };
-    let enPassant = null;
-    let logDiv = null;
-    let popupDiv = null;
+
+    const game = new Chess();
+    const boardDiv = document.getElementById("board");
+    const logDiv = document.getElementById("log");
+    const popupDiv = document.getElementById("popup");
+    const promotionMenu = document.getElementById("promotionMenu");
 
     function startGame() {
-      board = [
-        ['r','n','b','q','k','b','n','r'],
-        ['p','p','p','p','p','p','p','p'],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['P','P','P','P','P','P','P','P'],
-        ['R','N','B','Q','K','B','N','R']
-      ];
-      castlingRights = { K: true, Q: true, k: true, q: true };
-      enPassant = null;
-      whiteTurn = true;
-      selected = null;
-      logDiv = document.getElementById("log");
-      popupDiv = document.getElementById("popup");
+      game.reset();
       popupDiv.style.display = "none";
-      logDiv.innerHTML = "<b>게임 로그</b><br>";
+      promotionMenu.style.display = "none";
       render();
+      logDiv.innerHTML = "<b>게임 로그</b><br>";
     }
 
     function render() {
-      const boardDiv = document.getElementById("board");
       boardDiv.innerHTML = "";
-      let highlightMoves = [];
-      if (selected) {
-        highlightMoves = getLegalMoves(selected.x, selected.y);
-      }
+      const board = game.board();
       for (let y = 0; y < 8; y++) {
         for (let x = 0; x < 8; x++) {
           const cell = document.createElement("div");
           cell.className = "cell " + ((x + y) % 2 === 0 ? "white" : "black");
           const piece = board[y][x];
-          cell.textContent = PIECES[piece] || '';
+          if (piece) cell.textContent = PIECES[piece.color === 'w' ? piece.type.toUpperCase() : piece.type];
           cell.dataset.x = x;
           cell.dataset.y = y;
-          if (selected && selected.x === x && selected.y === y) {
-            cell.classList.add("selected");
-          }
-          if (highlightMoves.some(m => m.x === x && m.y === y)) {
-            const dot = document.createElement("div");
-            dot.className = "dot";
-            cell.appendChild(dot);
-          }
-          cell.onclick = () => onClick(x, y);
+          cell.onclick = () => handleClick(x, y);
           boardDiv.appendChild(cell);
         }
       }
     }
 
-    function onClick(x, y) {
-      const piece = board[y][x];
-      if (selected) {
-        const sx = selected.x, sy = selected.y;
-        const selPiece = board[sy][sx];
-        const moves = getLegalMoves(sx, sy);
-        const legal = moves.some(m => m.x === x && m.y === y);
-        if (legal) {
-          move(sx, sy, x, y);
-          selected = null;
-          whiteTurn = !whiteTurn;
+    let selectedSquare = null;
+
+    function handleClick(x, y) {
+      const square = toSquare(x, y);
+      const piece = game.get(square);
+      if (selectedSquare) {
+        const moves = game.moves({ square: selectedSquare, verbose: true });
+        const move = moves.find(m => m.to === square);
+        if (move) {
+          if (move.flags.includes("p")) {
+            showPromotionMenu(selectedSquare, square, move.color);
+            return;
+          }
+          game.move(move);
+          logMove(move);
+          selectedSquare = null;
           render();
+          if (checkEnd()) return;
           setTimeout(aiMove, 300);
           return;
         }
-        selected = null;
+        selectedSquare = null;
       } else {
-        if ((whiteTurn && isWhite(piece)) || (!whiteTurn && isBlack(piece))) {
-          selected = { x, y };
+        if (piece && piece.color === 'w' && game.turn() === 'w') {
+          selectedSquare = square;
         }
       }
-      render();
     }
 
-    function isWhite(p) { return p && p === p.toUpperCase(); }
-    function isBlack(p) { return p && p === p.toLowerCase(); }
+    function toSquare(x, y) {
+      return String.fromCharCode(97 + x) + (8 - y);
+    }
 
-    function log(text) {
-      if (logDiv) {
-        logDiv.innerHTML += `<div>${text}</div>`;
-        logDiv.scrollTop = logDiv.scrollHeight;
+    function logMove(move) {
+      const from = move.from;
+      const to = move.to;
+      const piece = PIECES[move.color === 'w' ? move.piece.toUpperCase() : move.piece];
+      logDiv.innerHTML += `<div>${piece} ${from} → ${to}</div>`;
+    }
+
+    function checkEnd() {
+      if (game.in_checkmate()) {
+        showPopup(game.turn() === 'w' ? "AI 승리!" : "사람 승리!");
+        return true;
+      } else if (game.in_stalemate() || game.in_draw()) {
+        showPopup("무승부입니다.");
+        return true;
       }
+      return false;
     }
 
     function showPopup(text) {
       popupDiv.innerText = text;
       popupDiv.style.display = "block";
-      setTimeout(() => popupDiv.style.display = "none", 5000);
     }
 
-    function promotePawn(x, y, isWhite, callback) {
-      const menu = document.getElementById("promotionMenu");
-      menu.innerHTML = "<p>프로모션할 기물을 선택하세요:</p>";
-      const options = isWhite ? ['Q', 'R', 'B', 'N'] : ['q', 'r', 'b', 'n'];
-      options.forEach(p => {
+    function showPromotionMenu(from, to, color) {
+      promotionMenu.innerHTML = "<p>승격할 기물을 선택하세요:</p>";
+      const types = ['q', 'r', 'b', 'n'];
+      types.forEach(type => {
         const btn = document.createElement("button");
-        btn.textContent = PIECES[p];
+        btn.textContent = PIECES[color === 'w' ? type.toUpperCase() : type];
         btn.onclick = () => {
-          board[y][x] = p;
-          menu.style.display = "none";
-          callback();
-        };
-        menu.appendChild(btn);
-      });
-      menu.style.display = "block";
-    }
-
-    function move(sx, sy, dx, dy) {
-      const piece = board[sy][sx];
-      if (piece.toLowerCase() === 'p' && enPassant && dx === enPassant.x && dy === enPassant.y) {
-        board[sy][dx] = '';
-      }
-      if (piece.toLowerCase() === 'k' && Math.abs(dx - sx) === 2) {
-        if (dx > sx) { board[dy][5] = board[dy][7]; board[dy][7] = ''; }
-        else { board[dy][3] = board[dy][0]; board[dy][0] = ''; }
-      }
-      board[dy][dx] = piece;
-      board[sy][sx] = '';
-      enPassant = null;
-      if (piece.toLowerCase() === 'p' && Math.abs(dy - sy) === 2) {
-        enPassant = { x: sx, y: (sy + dy) / 2 };
-      }
-      if ((piece === 'P' && dy === 0) || (piece === 'p' && dy === 7)) {
-        promotePawn(dx, dy, isWhite(piece), () => {
+          game.move({ from, to, promotion: type });
+          promotionMenu.style.display = "none";
           render();
-          afterMoveCheck();
-        });
-        return;
-      }
-      log(`${piece} ${String.fromCharCode(97 + sx)}${8 - sy} → ${String.fromCharCode(97 + dx)}${8 - dy}`);
+          if (!checkEnd()) setTimeout(aiMove, 300);
+        };
+        promotionMenu.appendChild(btn);
+      });
+      promotionMenu.style.display = "block";
     }
 
     function aiMove() {
-      const moves = [];
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          const piece = board[y][x];
-          if (isBlack(piece)) {
-            const legal = getLegalMoves(x, y);
-            for (const move of legal) {
-              moves.push({ from: { x, y }, to: move });
-            }
+      const level = parseInt(document.getElementById("aiLevel").value);
+      const moves = game.moves({ verbose: true });
+      if (level === 1) {
+        makeAIMove(moves[Math.floor(Math.random() * moves.length)]);
+      } else {
+        let bestMove = null;
+        let bestScore = -Infinity;
+        for (let move of moves) {
+          game.move(move);
+          const score = minimax(level - 1, false);
+          game.undo();
+          if (score > bestScore) {
+            bestScore = score;
+            bestMove = move;
           }
         }
+        makeAIMove(bestMove);
       }
-      if (moves.length === 0) {
-        showPopup("체크메이트 또는 스테일메이트: AI는 둘 수 없습니다.");
-        return;
-      }
-      const move = moves[Math.floor(Math.random() * moves.length)];
-      movePiece(move.from.x, move.from.y, move.to.x, move.to.y);
-      whiteTurn = true;
+    }
+
+    function makeAIMove(move) {
+      if (!move) return;
+      game.move(move);
+      logMove(move);
       render();
+      checkEnd();
     }
 
-    function movePiece(fx, fy, tx, ty) {
-      selected = null;
-      move(fx, fy, tx, ty);
+    function minimax(depth, isMaximizing) {
+      if (depth === 0 || game.game_over()) return evaluate();
+      const moves = game.moves({ verbose: true });
+      let best = isMaximizing ? -Infinity : Infinity;
+      for (let move of moves) {
+        game.move(move);
+        const val = minimax(depth - 1, !isMaximizing);
+        game.undo();
+        best = isMaximizing ? Math.max(best, val) : Math.min(best, val);
+      }
+      return best;
     }
 
-    function getLegalMoves(x, y) {
-      const piece = board[y][x];
-      const allMoves = getValidMoves(x, y);
-      return allMoves.filter(m => {
-        const backup = JSON.parse(JSON.stringify(board));
-        move(x, y, m.x, m.y);
-        const inCheck = false; // 나중에 킹 체크 검사 함수 연결
-        board = backup;
-        return !inCheck;
-      });
+    function evaluate() {
+      const values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 1000 };
+      let score = 0;
+      game.board().forEach(row => row.forEach(piece => {
+        if (piece) {
+          const val = values[piece.type];
+          score += (piece.color === 'b' ? 1 : -1) * val;
+        }
+      }));
+      return score;
     }
+
+    startGame();
   </script></body>
 </html>
