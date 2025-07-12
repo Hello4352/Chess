@@ -53,7 +53,7 @@
   <div id="board"></div>
   <div id="log"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@mliebelt/pgn-parser/stockfish.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stockfish@15.1.0/stockfish.js"></script>
   <script>
     const PIECES = {
       r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
@@ -62,10 +62,8 @@
 
     let board = [], selected = null, whiteTurn = true;
     let castlingRights = { K: true, Q: true, k: true, q: true };
-    let enPassant = null;
-    let logDiv = null;
-
-    let engine;
+    let enPassant = null, logDiv = null;
+    let engine = null, gameOver = false;
 
     function startGame() {
       board = [
@@ -82,23 +80,22 @@
       enPassant = null;
       whiteTurn = true;
       selected = null;
+      gameOver = false;
       logDiv = document.getElementById("log");
       logDiv.innerHTML = "<b>게임 로그</b><br>";
       render();
       if (!engine) {
-        engine = new Worker("https://cdn.jsdelivr.net/npm/stockfish/stockfish.js");
-        engine.onmessage = function(e) {
-          if (typeof e.data === "string" && e.data.startsWith("bestmove")) {
-            const move = e.data.split(" ")[1];
-            if (move.length === 4) {
-              const fx = move.charCodeAt(0) - 97;
-              const fy = 8 - parseInt(move[1]);
-              const tx = move.charCodeAt(2) - 97;
-              const ty = 8 - parseInt(move[3]);
-              movePiece(fx, fy, tx, ty);
+        engine = STOCKFISH();
+        engine.onmessage = (msg) => {
+          if (msg.startsWith("bestmove")) {
+            const move = msg.split(" ")[1];
+            if (move && move.length>=4) {
+              const fx=move.charCodeAt(0)-97, fy=8-parseInt(move[1]);
+              const tx=move.charCodeAt(2)-97, ty=8-parseInt(move[3]);
+              movePiece(fx,fy,tx,ty);
               whiteTurn = true;
               render();
-              checkGameOver();
+              afterMove();
             }
           }
         };
@@ -108,41 +105,39 @@
     function render() {
       const boardDiv = document.getElementById("board");
       boardDiv.innerHTML = "";
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
+      for (let y=0; y<8; y++) {
+        for (let x=0; x<8; x++) {
           const cell = document.createElement("div");
-          cell.className = "cell " + ((x + y) % 2 === 0 ? "white" : "black");
+          cell.className = "cell " + ((x+y)%2===0?"white":"black");
           const piece = board[y][x];
           cell.textContent = PIECES[piece] || '';
-          cell.dataset.x = x;
-          cell.dataset.y = y;
-          if (selected && selected.x == x && selected.y == y) {
-            cell.classList.add("selected");
-          }
-          cell.onclick = () => onClick(x, y);
+          if (isBlack(piece)) cell.style.color = "black"; 
+          else cell.style.color = "";
+          cell.dataset.x = x; cell.dataset.y = y;
+          if (selected && selected.x===x && selected.y===y) cell.classList.add("selected");
+          cell.onclick = () => onClick(x,y);
           boardDiv.appendChild(cell);
         }
       }
     }
 
     function onClick(x, y) {
+      if (gameOver) return;
       const piece = board[y][x];
       if (selected) {
         const sx = selected.x, sy = selected.y;
-        const selPiece = board[sy][sx];
-        const legal = getValidMoves(sx, sy).some(m => m.x === x && m.y === y);
+        const legal = getValidMoves(sx, sy).some(m => m.x===x && m.y===y);
         if (legal) {
           move(sx, sy, x, y);
           whiteTurn = false;
           selected = null;
           render();
-          checkGameOver();
-          setTimeout(aiMove, 300);
+          afterMove();
           return;
         }
         selected = null;
-      } else if ((whiteTurn && isWhite(piece))) {
-        selected = { x, y };
+      } else if (whiteTurn && isWhite(piece)) {
+        selected = {x,y};
       }
       render();
     }
@@ -151,52 +146,84 @@
       const piece = board[sy][sx];
       board[dy][dx] = piece;
       board[sy][sx] = '';
-      log(`${piece} ${String.fromCharCode(97 + sx)}${8 - sy} → ${String.fromCharCode(97 + dx)}${8 - dy}`);
+      log(`${piece} ${String.fromCharCode(97+sx)}${8-sy} → ${String.fromCharCode(97+dx)}${8-dy}`);
     }
 
-    function movePiece(fx, fy, tx, ty) {
+    function movePiece(fx,fy,tx,ty) {
       selected = null;
-      move(fx, fy, tx, ty);
+      move(fx,fy,tx,ty);
     }
 
-    function isWhite(p) { return p && p === p.toUpperCase(); }
-    function isBlack(p) { return p && p === p.toLowerCase(); }
+    function isWhite(p) { return p && p===p.toUpperCase(); }
+    function isBlack(p) { return p && p===p.toLowerCase(); }
 
     function log(text) {
-      if (logDiv) {
-        logDiv.innerHTML += `<div>${text}</div>`;
-        logDiv.scrollTop = logDiv.scrollHeight;
+      logDiv.innerHTML += `<div>${text}</div>`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function getAllLegalMoves(colorWhite) {
+      const moves = [];
+      for (let y=0; y<8; y++) {
+        for (let x=0; x<8; x++) {
+          const p=board[y][x];
+          if (p && (colorWhite?isWhite(p):isBlack(p))) {
+            getValidMoves(x,y).forEach(m=>moves.push({from:{x,y},to:m}));
+          }
+        }
+      }
+      return moves;
+    }
+
+    function inCheck(colorWhite) {
+      let kx, ky;
+      const color = colorWhite?"K":"k";
+      for (let y=0;y<8;y++)for(let x=0;x<8;x++) if (board[y][x]===color){kx=x;ky=y;}
+      const opponentMoves = getAllLegalMoves(!colorWhite);
+      return opponentMoves.some(m=>m.to.x===kx && m.to.y===ky);
+    }
+
+    function afterMove() {
+      if (!whiteTurn) {
+        if (getAllLegalMoves(false).length===0) {
+          if (inCheck(false)) log("체크메이트! 당신 승리"); else log("스테일메이트!");
+          gameOver = true; return;
+        }
+        if (inCheck(false)) log("AI가 체크당함!");
+        aiMove();
+      } else {
+        if (getAllLegalMoves(true).length===0) {
+          if (inCheck(true)) log("체크메이트! AI 승리"); else log("스테일메이트!");
+          gameOver = true; return;
+        }
+        if (inCheck(true)) log("체크!");
       }
     }
 
     function aiMove() {
       const fen = boardToFEN();
-      engine.postMessage(`position fen ${fen}`);
-      engine.postMessage("go depth 10");
+      engine.postMessage("position fen "+fen);
+      engine.postMessage("go depth 12");
     }
 
     function boardToFEN() {
-      let fen = "";
-      for (let y = 0; y < 8; y++) {
-        let empty = 0;
-        for (let x = 0; x < 8; x++) {
-          const piece = board[y][x];
-          if (!piece) empty++;
-          else {
-            if (empty > 0) { fen += empty; empty = 0; }
-            fen += piece;
-          }
+      let fen="";
+      for (let y=0;y<8;y++){
+        let empty=0;
+        for (let x=0;x<8;x++){
+          const p=board[y][x];
+          if (!p) empty++;
+          else { if (empty){fen+=empty; empty=0;} fen+=p; }
         }
-        if (empty > 0) fen += empty;
-        if (y !== 7) fen += "/";
+        if (empty) fen+=empty;
+        if (y<7) fen+="/";
       }
-      fen += whiteTurn ? " w" : " b";
-      fen += " - - 0 1"; // no castling/en passant info for now
+      fen += whiteTurn?" w":" b";
+      fen += castlingRights.K?" K":""; fen += castlingRights.Q?" Q":"";
+      fen += castlingRights.k?" k":""; fen += castlingRights.q?" q":"";
+      fen += enPassant?` ${String.fromCharCode(97+enPassant.x)}${8-enPassant.y}`:" -";
+      fen += " 0 1";
       return fen;
-    }
-
-    function checkGameOver() {
-      // 향후 체크/체크메이트 감지 로직 추가 가능
     }
 
     window.onload = startGame;
