@@ -1,4 +1,5 @@
 <!DOCTYPE html><html lang="en">
+>
 <head>
   <meta charset="UTF-8" />
   <title>사람 vs AI 체스</title>
@@ -26,6 +27,7 @@
       font-size: 34px;
       cursor: pointer;
       position: relative;
+      color: black; /* 기물 색상이 보이도록 설정 */
     }
     .white {
       background: #f9f9f9;
@@ -70,6 +72,22 @@
       border: 2px solid #333;
       font-size: 18px;
       display: none;
+      z-index: 1000;
+    }
+    #promotionMenu {
+      position: fixed;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border: 2px solid #333;
+      padding: 15px;
+      display: none;
+      z-index: 1001;
+    }
+    #promotionMenu button {
+      font-size: 24px;
+      margin: 5px;
     }
   </style>
 </head>
@@ -86,84 +104,60 @@
   </label>
   <div id="board"></div>
   <div id="log"></div>
-  <div id="popup"></div>  <script>
-    const PIECES = {
-      r: "♜", n: "♞", b: "♝", q: "♛", k: "♚", p: "♟",
-      R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔", P: "♙"
-    };
+  <div id="popup"></div>
+  <div id="promotionMenu"></div>  <script>
+    let promotionCallback = null;
 
-    let board = [], selected = null, whiteTurn = true;
-    let castlingRights = { K: true, Q: true, k: true, q: true };
-    let enPassant = null;
-    let logDiv = null;
-    let popupDiv = null;
-
-    function startGame() {
-      board = [
-        ['r','n','b','q','k','b','n','r'],
-        ['p','p','p','p','p','p','p','p'],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['','','','','','','',''],
-        ['P','P','P','P','P','P','P','P'],
-        ['R','N','B','Q','K','B','N','R']
-      ];
-      castlingRights = { K: true, Q: true, k: true, q: true };
-      enPassant = null;
-      whiteTurn = true;
-      selected = null;
-      logDiv = document.getElementById("log");
-      popupDiv = document.getElementById("popup");
-      popupDiv.style.display = "none";
-      logDiv.innerHTML = "<b>게임 로그</b><br>";
-      render();
-    }
-
-    function showPopup(text) {
-      popupDiv.innerText = text;
-      popupDiv.style.display = "block";
-      setTimeout(() => popupDiv.style.display = "none", 5000);
-    }
-
-    function isWhite(p) { return p && p === p.toUpperCase(); }
-    function isBlack(p) { return p && p === p.toLowerCase(); }
-
-    function getLegalMoves(x, y) {
-      const piece = board[y][x];
-      const allMoves = getValidMoves(x, y);
-      return allMoves.filter(m => {
-        const backup = JSON.parse(JSON.stringify(board));
-        move(x, y, m.x, m.y);
-        const inCheck = isKingInCheck(isWhite(piece));
-        board = backup;
-        return !inCheck;
+    function promotePawn(x, y, isWhite, callback) {
+      const menu = document.getElementById("promotionMenu");
+      menu.innerHTML = "<p>프로모션할 기물을 선택하세요:</p>";
+      const options = isWhite ? ['Q', 'R', 'B', 'N'] : ['q', 'r', 'b', 'n'];
+      options.forEach(p => {
+        const btn = document.createElement("button");
+        btn.textContent = PIECES[p];
+        btn.onclick = () => {
+          board[y][x] = p;
+          menu.style.display = "none";
+          if (callback) callback();
+        };
+        menu.appendChild(btn);
       });
+      menu.style.display = "block";
     }
 
-    function aiMove() {
-      const level = parseInt(document.getElementById("aiLevel").value);
-      const move = minimaxRoot(level, false);
-      if (move) {
-        movePiece(move.from.x, move.from.y, move.to.x, move.to.y);
-        whiteTurn = true;
-        render();
-        afterMoveCheck();
-      } else {
-        showPopup("AI가 둘 수 없습니다 (무승부 또는 체크메이트)");
+    function move(sx, sy, dx, dy) {
+      const piece = board[sy][sx];
+      const target = board[dy][dx];
+
+      if (piece.toLowerCase() === 'p' && enPassant && dx === enPassant.x && dy === enPassant.y) {
+        board[sy][dx] = '';
       }
-    }
 
-    function afterMoveCheck() {
-      if (isCheckmate(!whiteTurn)) {
-        showPopup((whiteTurn ? "흑" : "백") + " 체크메이트! 게임 종료.");
-      } else if (isStalemate(!whiteTurn)) {
-        showPopup("스테일메이트! 무승부입니다.");
-      } else if (isKingInCheck(!whiteTurn)) {
-        log((whiteTurn ? "흑" : "백") + "의 킹이 체크 상태입니다!");
+      if (piece.toLowerCase() === 'k' && Math.abs(dx - sx) === 2) {
+        if (dx > sx) {
+          board[dy][5] = board[dy][7]; board[dy][7] = '';
+        } else {
+          board[dy][3] = board[dy][0]; board[dy][0] = '';
+        }
       }
-    }
 
-    window.onload = startGame;
+      board[dy][dx] = piece;
+      board[sy][sx] = '';
+
+      enPassant = null;
+      if (piece.toLowerCase() === 'p' && Math.abs(dy - sy) === 2) {
+        enPassant = { x: sx, y: (sy + dy) / 2 };
+      }
+
+      if ((piece === 'P' && dy === 0) || (piece === 'p' && dy === 7)) {
+        promotePawn(dx, dy, isWhite(piece), () => {
+          render();
+          afterMoveCheck();
+        });
+        return;
+      }
+
+      log(`${piece} ${String.fromCharCode(97 + sx)}${8 - sy} → ${String.fromCharCode(97 + dx)}${8 - dy}`);
+    }
   </script></body>
 </html>
